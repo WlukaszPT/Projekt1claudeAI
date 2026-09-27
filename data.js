@@ -81,6 +81,12 @@ window.APP_DATA = {
     ],
   },
 
+  INITIAL_GOALS: [
+    { id: 1, name: "Fundusz awaryjny", target: 20000, saved: 12500 },
+    { id: 2, name: "Wakacje", target: 6000, saved: 2400 },
+    { id: 3, name: "Nowy laptop", target: 5000, saved: 5000 },
+  ],
+
   INITIAL_TRANSACTIONS: [
     { date: "26.09.2026", desc: "Wypłata wynagrodzenia", category: "Wpływy", amount: 7100 },
     { date: "24.09.2026", desc: "Czynsz + media", category: "Mieszkanie i media", amount: -1800 },
