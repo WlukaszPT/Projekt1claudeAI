@@ -222,17 +222,17 @@ function SummaryCards({ balance, currentMonth }) {
 
 const BITCOIN_SLIDES = [
   {
-    img: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f0/Ethereum_logo.png/1200px-Ethereum_logo.png",
+    img: "https://picsum.photos/600/400?random=1",
     title: "Ethereum — Smart Contracts",
     text: "Platforma dla aplikacji zdecentralizowanych, umożliwiająca pisanie inteligentnych kontraktów i tokenów.",
   },
   {
-    img: "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6f/Ethereum_Classic_-_Logo_2014-2019.svg/1024px-Ethereum_Classic_-_Logo_2014-2019.svg.png",
+    img: "https://picsum.photos/600/400?random=2",
     title: "Zdecentralizowana Finanse",
     text: "DeFi rewolucjonizuje dostęp do usług finansowych, eliminując pośredników i zwiększając przejrzystość.",
   },
   {
-    img: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/12/Coinbase_logo.svg/1280px-Coinbase_logo.svg.png",
+    img: "https://picsum.photos/600/400?random=3",
     title: "Bezpieczne Przechowywanie",
     text: "Nowoczesne portfele kryptograficzne oferują bezpieczny, zdecentralizowany sposób zarządzania aktywami cyfrowymi.",
   },
@@ -264,9 +264,13 @@ function BitcoinCarousel() {
 
       <div className="swiper bitcoin-swiper" ref={containerRef}>
         <div className="swiper-wrapper">
-          {BITCOIN_SLIDES.map((s) => (
-            <div className="swiper-slide" key={s.title}>
-              <img src={s.img} alt={s.title} />
+          {BITCOIN_SLIDES.map((s, idx) => (
+            <div className="swiper-slide" key={s.title} style={{ background: ['linear-gradient(135deg, #4F46E5 0%, #10B981 100%)', 'linear-gradient(135deg, #10B981 0%, #F59E0B 100%)', 'linear-gradient(135deg, #F59E0B 0%, #4F46E5 100%)'][idx] }}>
+              <div className="slide-content">
+                <div className="slide-icon">
+                  {idx === 0 ? <i className="fa-brands fa-ethereum"></i> : idx === 1 ? <i className="fa-solid fa-chart-line"></i> : <i className="fa-solid fa-lock"></i>}
+                </div>
+              </div>
               <div className="slide-caption">
                 <h3>{s.title}</h3>
                 <p>{s.text}</p>
