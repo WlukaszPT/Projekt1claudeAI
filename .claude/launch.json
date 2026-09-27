@@ -3,9 +3,10 @@
   "configurations": [
     {
       "name": "moje-finanse-static",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8000"],
-      "port": 8000
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": ["-Command", "python -m http.server $env:PORT"],
+      "port": 8000,
+      "autoPort": true
     }
   ]
 }
