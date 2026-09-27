@@ -68,6 +68,7 @@ const {
   INITIAL_MONTHLY,
   MONTHLY_CATEGORY_BREAKDOWN,
   INITIAL_TRANSACTIONS,
+  INITIAL_GOALS,
 } = window.APP_DATA;
 
 const { useState, useEffect, useRef, useMemo } = React;
@@ -94,6 +95,25 @@ function txDateISO(dateStr) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+// ---------- Pomocnicze: trwały zapis stanu w localStorage ----------
+
+function loadState(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function saveState(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    // np. tryb prywatny przeglądarki — pomijamy zapis
+  }
+}
+
 // ---------- Tło (dekoracyjne, szklane blobs) ----------
 
 function BackgroundDecor() {
@@ -113,8 +133,8 @@ function Sidebar() {
     { href: "#bitcoin", icon: "fa-brands fa-bitcoin", label: "Bitcoin" },
     { href: "#wykresy", icon: "fa-solid fa-chart-pie", label: "Analiza" },
     { href: "#transakcje", icon: "fa-solid fa-receipt", label: "Transakcje" },
-    { href: "#", icon: "fa-solid fa-bullseye", label: "Cele oszczędnościowe" },
-    { href: "#", icon: "fa-solid fa-gear", label: "Ustawienia" },
+    { href: "#cele", icon: "fa-solid fa-bullseye", label: "Cele oszczędnościowe" },
+    { href: "#ustawienia", icon: "fa-solid fa-gear", label: "Ustawienia" },
   ];
 
   return (
@@ -142,12 +162,12 @@ function Sidebar() {
   );
 }
 
-function Topbar({ onAddClick }) {
+function Topbar({ onAddClick, currentMonth }) {
   return (
     <header className="topbar" id="dashboard">
       <div>
         <h1>Panel domowego budżetu</h1>
-        <p className="subtitle">Wrzesień 2026 — przegląd wpływów, wydatków i kosztów stałych</p>
+        <p className="subtitle">{currentMonth.month} 2026 — przegląd wpływów, wydatków i kosztów stałych</p>
       </div>
       <button className="btn-primary" onClick={onAddClick}>
         <i className="fa-solid fa-plus"></i> Dodaj transakcję
@@ -470,12 +490,17 @@ function TransactionsTable({ transactions }) {
   const [filterMode, setFilterMode] = useState("month");
   const [monthValue, setMonthValue] = useState("");
   const [dayValue, setDayValue] = useState("");
+  const [search, setSearch] = useState("");
 
   const hasFilter = filterMode === "month" ? !!monthValue : !!dayValue;
 
   const filtered = transactions.filter((t) => {
-    if (filterMode === "month") return !monthValue || txMonthKey(t.date) === monthValue;
-    return !dayValue || txDateISO(t.date) === dayValue;
+    const matchesDate = filterMode === "month"
+      ? (!monthValue || txMonthKey(t.date) === monthValue)
+      : (!dayValue || txDateISO(t.date) === dayValue);
+    const query = search.trim().toLowerCase();
+    const matchesSearch = !query || t.desc.toLowerCase().includes(query) || t.category.toLowerCase().includes(query);
+    return matchesDate && matchesSearch;
   });
 
   function selectMode(mode) {
@@ -493,23 +518,35 @@ function TransactionsTable({ transactions }) {
     <section className="section" id="transakcje" data-aos="fade-up">
       <div className="section-header">
         <h2><i className="fa-solid fa-receipt"></i> Ostatnie transakcje</h2>
-        <div className="date-filter">
-          <div className="filter-toggle">
-            <button type="button" className={filterMode === "month" ? "active" : ""} onClick={() => selectMode("month")}>Miesiąc</button>
-            <button type="button" className={filterMode === "day" ? "active" : ""} onClick={() => selectMode("day")}>Dzień</button>
+        <div className="table-controls">
+          <div className="search-wrap">
+            <i className="fa-solid fa-magnifying-glass"></i>
+            <input
+              type="text"
+              className="search-input"
+              placeholder="Szukaj opisu lub kategorii…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
-          <TransactionsDatePicker
-            filterMode={filterMode}
-            monthValue={monthValue}
-            dayValue={dayValue}
-            onMonthChange={setMonthValue}
-            onDayChange={setDayValue}
-          />
-          {hasFilter && (
-            <button type="button" className="clear-filter" onClick={clearFilter} title="Wyczyść filtr">
-              <i className="fa-solid fa-xmark"></i>
-            </button>
-          )}
+          <div className="date-filter">
+            <div className="filter-toggle">
+              <button type="button" className={filterMode === "month" ? "active" : ""} onClick={() => selectMode("month")}>Miesiąc</button>
+              <button type="button" className={filterMode === "day" ? "active" : ""} onClick={() => selectMode("day")}>Dzień</button>
+            </div>
+            <TransactionsDatePicker
+              filterMode={filterMode}
+              monthValue={monthValue}
+              dayValue={dayValue}
+              onMonthChange={setMonthValue}
+              onDayChange={setDayValue}
+            />
+            {hasFilter && (
+              <button type="button" className="clear-filter" onClick={clearFilter} title="Wyczyść filtr">
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            )}
+          </div>
         </div>
       </div>
       <div className="table-card">
@@ -693,12 +730,159 @@ function MonthDetailModal({ month, data, onClose }) {
   );
 }
 
+// ---------- Modal: Nowy cel oszczędnościowy ----------
+
+function AddGoalModal({ onClose, onAdd }) {
+  const { visible, close } = useModalVisibility(onClose);
+  const [name, setName] = useState("");
+  const [target, setTarget] = useState("");
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    const value = parseFloat(target);
+    if (!name.trim() || !value || value <= 0) return;
+    onAdd({ id: Date.now(), name: name.trim(), target: value, saved: 0 });
+    close();
+  }
+
+  return (
+    <div className={`modal-overlay ${visible ? "is-open" : ""}`} onClick={close}>
+      <div className={`modal-panel ${visible ? "is-open" : ""}`} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3><i className="fa-solid fa-bullseye"></i> Nowy cel oszczędnościowy</h3>
+          <button className="modal-close" onClick={close}><i className="fa-solid fa-xmark"></i></button>
+        </div>
+        <form className="modal-form" onSubmit={handleSubmit}>
+          <label>
+            Nazwa celu
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="np. Wakacje w górach" required />
+          </label>
+          <label>
+            Kwota docelowa (zł)
+            <input type="number" min="1" step="1" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="0" required />
+          </label>
+          <div className="modal-actions">
+            <button type="button" className="btn-secondary" onClick={close}>Anuluj</button>
+            <button type="submit" className="btn-primary"><i className="fa-solid fa-check"></i> Dodaj cel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Karta pojedynczego celu ----------
+
+function GoalCard({ goal, onContribute }) {
+  const [showForm, setShowForm] = useState(false);
+  const [amount, setAmount] = useState("");
+
+  const pct = Math.min(100, Math.round((goal.saved / goal.target) * 100));
+  const done = goal.saved >= goal.target;
+
+  function submit(e) {
+    e.preventDefault();
+    const value = parseFloat(amount);
+    if (!value || value <= 0) return;
+    onContribute(goal.id, value);
+    setAmount("");
+    setShowForm(false);
+  }
+
+  return (
+    <div className="goal-card">
+      <div className="goal-header">
+        <span className="goal-name">{goal.name}</span>
+        {done && <span className="goal-badge"><i className="fa-solid fa-circle-check"></i> Cel osiągnięty</span>}
+      </div>
+      <div className="goal-progress-track">
+        <div className="goal-progress-fill" style={{ width: `${pct}%` }}></div>
+      </div>
+      <div className="goal-meta">
+        <span>{goal.saved.toLocaleString("pl-PL")} zł / {goal.target.toLocaleString("pl-PL")} zł</span>
+        <span className="goal-pct">{pct}%</span>
+      </div>
+      {!done && (
+        showForm ? (
+          <form className="goal-contribute-form" onSubmit={submit}>
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              autoFocus
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="Kwota (zł)"
+            />
+            <button type="submit" className="btn-secondary">Dodaj</button>
+          </form>
+        ) : (
+          <button type="button" className="goal-add-btn" onClick={() => setShowForm(true)}>
+            <i className="fa-solid fa-plus"></i> Dodaj wpłatę
+          </button>
+        )
+      )}
+    </div>
+  );
+}
+
+// ---------- Sekcja: Cele oszczędnościowe ----------
+
+function SavingsGoalsSection({ goals, onContribute, onAddGoal }) {
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  return (
+    <section className="section" id="cele" data-aos="fade-up">
+      <div className="section-header">
+        <h2><i className="fa-solid fa-bullseye"></i> Cele oszczędnościowe</h2>
+        <button className="btn-secondary" onClick={() => setShowAddModal(true)}>
+          <i className="fa-solid fa-plus"></i> Nowy cel
+        </button>
+      </div>
+      <div className="goals-grid">
+        {goals.map((g) => <GoalCard key={g.id} goal={g} onContribute={onContribute} />)}
+      </div>
+      {showAddModal && <AddGoalModal onClose={() => setShowAddModal(false)} onAdd={onAddGoal} />}
+    </section>
+  );
+}
+
+// ---------- Sekcja: Ustawienia ----------
+
+function SettingsSection({ onReset }) {
+  return (
+    <section className="section" id="ustawienia" data-aos="fade-up">
+      <div className="section-header">
+        <h2><i className="fa-solid fa-gear"></i> Ustawienia</h2>
+      </div>
+      <div className="settings-card">
+        <div className="settings-row">
+          <div>
+            <strong>Dane lokalne</strong>
+            <p>Transakcje i cele oszczędnościowe są zapisywane w tej przeglądarce (localStorage) i nie są wysyłane na żaden serwer.</p>
+          </div>
+        </div>
+        <div className="settings-row">
+          <div>
+            <strong>Przywróć dane domyślne</strong>
+            <p>Usuwa wszystkie dodane transakcje i cele, przywracając dane przykładowe.</p>
+          </div>
+          <button type="button" className="btn-secondary danger" onClick={onReset}>
+            <i className="fa-solid fa-rotate-left"></i> Resetuj dane
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ---------- App ----------
 
 function App() {
-  const [monthly, setMonthly] = useState(INITIAL_MONTHLY);
-  const [transactions, setTransactions] = useState(INITIAL_TRANSACTIONS);
-  const [balance, setBalance] = useState(BASE_BALANCE);
+  const [monthly, setMonthly] = useState(() => loadState("mf_monthly", INITIAL_MONTHLY));
+  const [transactions, setTransactions] = useState(() => loadState("mf_transactions", INITIAL_TRANSACTIONS));
+  const [balance, setBalance] = useState(() => loadState("mf_balance", BASE_BALANCE));
+  const [goals, setGoals] = useState(() => loadState("mf_goals", INITIAL_GOALS));
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(null);
 
@@ -711,6 +895,11 @@ function App() {
   useEffect(() => {
     AOS.init({ duration: 700, once: true, offset: 40 });
   }, []);
+
+  useEffect(() => saveState("mf_monthly", monthly), [monthly]);
+  useEffect(() => saveState("mf_transactions", transactions), [transactions]);
+  useEffect(() => saveState("mf_balance", balance), [balance]);
+  useEffect(() => saveState("mf_goals", goals), [goals]);
 
   function handleAddTransaction(tx) {
     setTransactions((prev) => [tx, ...prev]);
@@ -725,17 +914,35 @@ function App() {
     });
   }
 
+  function handleContribute(goalId, amount) {
+    setGoals((prev) => prev.map((g) => (g.id === goalId ? { ...g, saved: Math.min(g.target, g.saved + amount) } : g)));
+  }
+
+  function handleAddGoal(goal) {
+    setGoals((prev) => [...prev, goal]);
+  }
+
+  function handleReset() {
+    if (!window.confirm("Na pewno przywrócić dane domyślne? Utracisz dodane transakcje i cele.")) return;
+    setTransactions(INITIAL_TRANSACTIONS);
+    setMonthly(INITIAL_MONTHLY);
+    setBalance(BASE_BALANCE);
+    setGoals(INITIAL_GOALS);
+  }
+
   return (
     <>
       <BackgroundDecor />
       <div className="app">
         <Sidebar />
         <main>
-          <Topbar onAddClick={() => setShowAddModal(true)} />
+          <Topbar onAddClick={() => setShowAddModal(true)} currentMonth={currentMonth} />
           <SummaryCards balance={balance} currentMonth={currentMonth} />
           <BitcoinCarousel />
           <ChartsSection monthly={monthly} onSelectMonth={setSelectedMonth} currentBreakdown={currentBreakdown} />
           <TransactionsTable transactions={transactions} />
+          <SavingsGoalsSection goals={goals} onContribute={handleContribute} onAddGoal={handleAddGoal} />
+          <SettingsSection onReset={handleReset} />
           <footer className="footer">
             <p>Moje Finanse — prywatny panel budżetowy. Dane przykładowe, wygenerowane lokalnie.</p>
           </footer>
