@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Moje Finanse — panel domowego budżetu</title>
+
+<!-- Google Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Font Awesome (ikony) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6/css/all.min.css">
+
+<!-- Swiper.js (karuzela) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css">
+
+<!-- AOS (animacje przy scrollu) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.css">
+
+<!-- Flatpickr (czytelny wybór daty/miesiąca) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/plugins/monthSelect/style.css">
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="root"></div>
+
+<!-- Dane przykładowe -->
+<script src="data.js"></script>
+
+<!-- React -->
+<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+
+<!-- Pozostałe biblioteki zewnętrzne -->
+<script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/countup.js@2.8.0/dist/countUp.umd.js"></script>
+
+<!-- Chart.js — etykiety procentowe na wykresie kołowym -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+
+<!-- Flatpickr (czytelny wybór daty/miesiąca) -->
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/plugins/monthSelect/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/pl.js"></script>
+
+<!-- Babel standalone (transformacja JSX w przeglądarce) -->
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+
+<!--
+  Aplikacja React jest osadzona bezpośrednio tutaj (a nie w osobnym pliku
+  ładowanym przez "src") celowo: Babel Standalone wczytuje zewnętrzne
+  skrypty "text/babel" przez żądanie sieciowe (XHR), a przeglądarki
+  blokują takie żądania do plików lokalnych otwartych przez podwójne
+  kliknięcie (protokół file://). Kod inline nie ma tego ograniczenia.
+-->
+<script type="text/babel">
+const {
+  BASE_BALANCE,
+  FIXED_COSTS,
+  EXPENSE_CATEGORIES,
+  CATEGORY_COLORS,
+  INITIAL_MONTHLY,
+  MONTHLY_CATEGORY_BREAKDOWN,
+  INITIAL_TRANSACTIONS,
+} = window.APP_DATA;
+
+const { useState, useEffect, useRef, useMemo } = React;
+
+const MONTHS_GENITIVE_PL = [
+  "stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca",
+  "lipca", "sierpnia", "września", "października", "listopada", "grudnia",
+];
+
+// ---------- Pomocnicze: parsowanie dat transakcji (dd.mm.rrrr) ----------
+
+function parseTxDate(dateStr) {
+  const [d, m, y] = dateStr.split(".").map(Number);
+  return { day: d, month: m, year: y };
+}
+
+function txMonthKey(dateStr) {
+  const { month, year } = parseTxDate(dateStr);
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+function txDateISO(dateStr) {
+  const { day, month, year } = parseTxDate(dateStr);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+// ---------- Tło (dekoracyjne, szklane blobs) ----------
+
+function BackgroundDecor() {
+  return (
+    <div className="bg-decor" aria-hidden="true">
+      <span className="blob blob-blue"></span>
+      <span className="blob blob-orange"></span>
+    </div>
+  );
+}
+
+// ---------- Sidebar / Topbar ----------
+
+function Sidebar() {
+  const links = [
+    { href: "#dashboard", icon: "fa-solid fa-chart-line", label: "Dashboard", active: true },
+    { href: "#bitcoin", icon: "fa-brands fa-bitcoin", label: "Bitcoin" },
+    { href: "#wykresy", icon: "fa-solid fa-chart-pie", label: "Analiza" },
+    { href: "#transakcje", icon: "fa-solid fa-receipt", label: "Transakcje" },
+    { href: "#", icon: "fa-solid fa-bullseye", label: "Cele oszczędnościowe" },
+    { href: "#", icon: "fa-solid fa-gear", label: "Ustawienia" },
+  ];
+
+  return (
+    <aside className="sidebar">
+      <div className="logo">
+        <i className="fa-solid fa-wallet"></i>
+        <span>Moje Finanse</span>
+      </div>
+      <nav className="nav">
+        {links.map((l) => (
+          <a key={l.label} href={l.href} className={`nav-link ${l.active ? "active" : ""}`}>
+            <i className={l.icon}></i>
+            <span>{l.label}</span>
+          </a>
+        ))}
+      </nav>
+      <div className="sidebar-footer">
+        <i className="fa-solid fa-circle-user"></i>
+        <div>
+          <strong>Twój budżet</strong>
+          <span>Konto prywatne</span>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function Topbar({ onAddClick }) {
+  return (
+    <header className="topbar" id="dashboard">
+      <div>
+        <h1>Panel domowego budżetu</h1>
+        <p className="subtitle">Wrzesień 2026 — przegląd wpływów, wydatków i kosztów stałych</p>
+      </div>
+      <button className="btn-primary" onClick={onAddClick}>
+        <i className="fa-solid fa-plus"></i> Dodaj transakcję
+      </button>
+    </header>
+  );
+}
+
+// ---------- Animowana wartość liczbowa (CountUp.js) ----------
+
+function CountUpValue({ value, decimals = 0 }) {
+  const ref = useRef(null);
+  const prevValue = useRef(0);
+
+  useEffect(() => {
+    const counter = new countUp.CountUp(ref.current, value, {
+      startVal: prevValue.current,
+      duration: 1.2,
+      separator: " ",
+      decimal: ",",
+      decimalPlaces: decimals,
+    });
+    if (!counter.error) counter.start();
+    prevValue.current = value;
+  }, [value, decimals]);
+
+  return <span className="card-value" ref={ref}>0</span>;
+}
+
+// ---------- Karty podsumowania ----------
+
+function SummaryCards({ balance, currentMonth }) {
+  return (
+    <section className="cards" data-aos="fade-up">
+      <div className="card">
+        <div className="card-icon blue"><i className="fa-solid fa-scale-balanced"></i></div>
+        <div className="card-body">
+          <span className="card-label">Saldo konta</span>
+          <CountUpValue value={balance} decimals={2} />
+          <span className="card-trend up"><i className="fa-solid fa-arrow-trend-up"></i> +4.2% m/m</span>
+        </div>
+      </div>
+      <div className="card">
+        <div className="card-icon green"><i className="fa-solid fa-arrow-down-long"></i></div>
+        <div className="card-body">
+          <span className="card-label">Wpływy ({currentMonth.month.toLowerCase()})</span>
+          <CountUpValue value={currentMonth.income} />
+          <span className="card-trend up"><i className="fa-solid fa-arrow-trend-up"></i> +4.4% m/m</span>
+        </div>
+      </div>
+      <div className="card">
+        <div className="card-icon red"><i className="fa-solid fa-arrow-up-long"></i></div>
+        <div className="card-body">
+          <span className="card-label">Wydatki ({currentMonth.month.toLowerCase()})</span>
+          <CountUpValue value={currentMonth.expense} />
+          <span className="card-trend down"><i className="fa-solid fa-arrow-trend-down"></i> -5.8% m/m</span>
+        </div>
+      </div>
+      <div className="card">
+        <div className="card-icon orange"><i className="fa-solid fa-file-invoice-dollar"></i></div>
+        <div className="card-body">
+          <span className="card-label">Koszty stałe / mies.</span>
+          <CountUpValue value={FIXED_COSTS} />
+          <span className="card-trend neutral"><i className="fa-solid fa-minus"></i> bez zmian</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ---------- Karuzela Bitcoin (Swiper.js) ----------
+
+const BITCOIN_SLIDES = [
+  {
+    img: "https://upload.wikimedia.org/wikipedia/commons/5/50/Bitcoin.png",
+    title: "Czym jest Bitcoin?",
+    text: "Pierwsza i najbardziej znana kryptowaluta, stworzona w 2009 roku przez pseudonimowego twórcę Satoshi Nakamoto.",
+  },
+  {
+    img: "https://upload.wikimedia.org/wikipedia/commons/f/fa/Bit-coin.jpg",
+    title: "Fizyczna reprezentacja",
+    text: "W rzeczywistości BTC istnieje wyłącznie jako zapis w rozproszonym rejestrze (blockchain) — monety to symbol kolekcjonerski.",
+  },
+  {
+    img: "https://upload.wikimedia.org/wikipedia/commons/b/b6/Bitcoin_coin_in_plastic_packaging.jpg",
+    title: "Aktywo alternatywne",
+    text: "Coraz częściej traktowany jako element dywersyfikacji prywatnego portfela inwestycyjnego, obok gotówki i akcji.",
+  },
+];
+
+function BitcoinCarousel() {
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const swiper = new Swiper(containerRef.current, {
+      loop: true,
+      autoplay: { delay: 4500, disableOnInteraction: false },
+      speed: 600,
+      navigation: {
+        nextEl: ".swiper-button-next",
+        prevEl: ".swiper-button-prev",
+      },
+      pagination: { el: ".swiper-pagination", clickable: true },
+    });
+    return () => swiper.destroy(true, true);
+  }, []);
+
+  return (
+    <section className="section" id="bitcoin" data-aos="fade-up">
+      <div className="section-header">
+        <h2><i className="fa-brands fa-bitcoin orange-text"></i> Bitcoin — kurs i ciekawostki</h2>
+        <span className="badge orange">BTC/PLN ~ 412 300 zł</span>
+      </div>
+
+      <div className="swiper bitcoin-swiper" ref={containerRef}>
+        <div className="swiper-wrapper">
+          {BITCOIN_SLIDES.map((s) => (
+            <div className="swiper-slide" key={s.title}>
+              <img src={s.img} alt={s.title} />
+              <div className="slide-caption">
+                <h3>{s.title}</h3>
+                <p>{s.text}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="swiper-pagination"></div>
+        <div className="swiper-button-prev"></div>
+        <div className="swiper-button-next"></div>
+      </div>
+    </section>
+  );
+}
+
+// ---------- Wykres 3D: Wpływy vs Wydatki (ECharts-GL, klikalny drill-down) ----------
+
+function IncomeExpenseChart({ monthly, onSelectMonth }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const chart = new Chart(canvasRef.current, {
+      type: "bar",
+      data: {
+        labels: monthly.map((m) => m.month),
+        datasets: [
+          { label: "Wpływy", data: monthly.map((m) => m.income), backgroundColor: "#22c55e", borderRadius: 6, maxBarThickness: 28 },
+          { label: "Wydatki", data: monthly.map((m) => m.expense), backgroundColor: "#f43f5e", borderRadius: 6, maxBarThickness: 28 },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        onClick: (evt, elements) => {
+          if (elements.length) onSelectMonth(monthly[elements[0].index].month);
+        },
+        onHover: (evt, elements) => {
+          evt.native.target.style.cursor = elements.length ? "pointer" : "default";
+        },
+        plugins: {
+          legend: { position: "top", align: "end", labels: { usePointStyle: true, boxWidth: 8 } },
+          tooltip: {
+            callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString("pl-PL")} zł` },
+          },
+        },
+        scales: {
+          x: { grid: { display: false } },
+          y: {
+            grid: { color: "rgba(255,255,255,0.06)" },
+            ticks: { callback: (v) => v.toLocaleString("pl-PL") + " zł" },
+          },
+        },
+      },
+    });
+    return () => chart.destroy();
+  }, [monthly, onSelectMonth]);
+
+  return <canvas ref={canvasRef}></canvas>;
+}
+
+// ---------- Wykres: Podział wydatków wg kategorii ----------
+
+const centerTotalPlugin = {
+  id: "centerTotal",
+  afterDraw(chart) {
+    const total = chart.data.datasets[0].data.reduce((sum, v) => sum + v, 0);
+    const { ctx, chartArea } = chart;
+    const x = (chartArea.left + chartArea.right) / 2;
+    const y = (chartArea.top + chartArea.bottom) / 2;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#eef0f4";
+    ctx.font = "600 20px Poppins, sans-serif";
+    ctx.fillText(`${total.toLocaleString("pl-PL")} zł`, x, y - 10);
+    ctx.fillStyle = "#9099ac";
+    ctx.font = "12px Inter, sans-serif";
+    ctx.fillText("wydatki razem", x, y + 12);
+    ctx.restore();
+  },
+};
+
+function ExpenseCategoryChart({ breakdown }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const total = breakdown.reduce((sum, c) => sum + c.amount, 0);
+
+    const chart = new Chart(canvasRef.current, {
+      type: "doughnut",
+      plugins: [ChartDataLabels, centerTotalPlugin],
+      data: {
+        labels: breakdown.map((c) => c.category),
+        datasets: [
+          {
+            data: breakdown.map((c) => c.amount),
+            backgroundColor: breakdown.map((c) => CATEGORY_COLORS[c.category] || "#64748b"),
+            borderColor: "#232837",
+            borderWidth: 3,
+            hoverOffset: 10,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: "68%",
+        animation: { animateRotate: true, animateScale: true },
+        plugins: {
+          legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8, padding: 14 } },
+          tooltip: {
+            callbacks: { label: (ctx) => `${ctx.label}: ${ctx.parsed.toLocaleString("pl-PL")} zł` },
+          },
+          datalabels: {
+            color: "#fff",
+            font: { weight: "600", size: 11 },
+            formatter: (value) => (total ? `${Math.round((value / total) * 100)}%` : ""),
+          },
+        },
+      },
+    });
+    return () => chart.destroy();
+  }, [breakdown]);
+
+  return <canvas ref={canvasRef}></canvas>;
+}
+
+function ChartsSection({ monthly, onSelectMonth, currentBreakdown }) {
+  return (
+    <section className="section" id="wykresy" data-aos="fade-up">
+      <div className="section-header">
+        <h2><i className="fa-solid fa-chart-column"></i> Analiza finansowa</h2>
+      </div>
+      <div className="charts-grid">
+        <div className="chart-card">
+          <h3>Wpływy vs Wydatki — ostatnie 6 miesięcy</h3>
+          <IncomeExpenseChart monthly={monthly} onSelectMonth={onSelectMonth} />
+          <p className="chart-hint"><i className="fa-solid fa-circle-info"></i> Kliknij słupek miesiąca, aby zobaczyć szczegóły</p>
+        </div>
+        <div className="chart-card">
+          <h3>Podział wydatków wg kategorii</h3>
+          <ExpenseCategoryChart breakdown={currentBreakdown} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ---------- Tabela transakcji ----------
+
+function TransactionsDatePicker({ filterMode, monthValue, dayValue, onMonthChange, onDayChange }) {
+  const inputRef = useRef(null);
+  const fpRef = useRef(null);
+
+  useEffect(() => {
+    fpRef.current = flatpickr(inputRef.current, {
+      locale: flatpickr.l10ns.pl,
+      altInput: true,
+      altInputClass: "date-input",
+      allowInput: false,
+      ...(filterMode === "month"
+        ? {
+            plugins: [new monthSelectPlugin({ shorthand: false, dateFormat: "Y-m", altFormat: "F Y" })],
+            onChange: (dates, dateStr) => onMonthChange(dateStr),
+          }
+        : {
+            dateFormat: "Y-m-d",
+            altFormat: "j F Y",
+            formatDate: (date, format) => {
+              const pad = (n) => String(n).padStart(2, "0");
+              if (format === "j F Y") {
+                return `${date.getDate()} ${MONTHS_GENITIVE_PL[date.getMonth()]} ${date.getFullYear()}`;
+              }
+              return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+            },
+            onChange: (dates, dateStr) => onDayChange(dateStr),
+          }),
+    });
+    return () => fpRef.current.destroy();
+  }, [filterMode]);
+
+  useEffect(() => {
+    if (!fpRef.current) return;
+    const current = filterMode === "month" ? monthValue : dayValue;
+    if (!current) fpRef.current.clear();
+  }, [monthValue, dayValue, filterMode]);
+
+  return (
+    <div className="date-picker-wrap">
+      <i className="fa-solid fa-calendar-days"></i>
+      <input ref={inputRef} type="text" placeholder={filterMode === "month" ? "Wybierz miesiąc…" : "Wybierz dzień…"} />
+    </div>
+  );
+}
+
+function TransactionsTable({ transactions }) {
+  const [filterMode, setFilterMode] = useState("month");
+  const [monthValue, setMonthValue] = useState("");
+  const [dayValue, setDayValue] = useState("");
+
+  const hasFilter = filterMode === "month" ? !!monthValue : !!dayValue;
+
+  const filtered = transactions.filter((t) => {
+    if (filterMode === "month") return !monthValue || txMonthKey(t.date) === monthValue;
+    return !dayValue || txDateISO(t.date) === dayValue;
+  });
+
+  function selectMode(mode) {
+    setFilterMode(mode);
+    setMonthValue("");
+    setDayValue("");
+  }
+
+  function clearFilter() {
+    setMonthValue("");
+    setDayValue("");
+  }
+
+  return (
+    <section className="section" id="transakcje" data-aos="fade-up">
+      <div className="section-header">
+        <h2><i className="fa-solid fa-receipt"></i> Ostatnie transakcje</h2>
+        <div className="date-filter">
+          <div className="filter-toggle">
+            <button type="button" className={filterMode === "month" ? "active" : ""} onClick={() => selectMode("month")}>Miesiąc</button>
+            <button type="button" className={filterMode === "day" ? "active" : ""} onClick={() => selectMode("day")}>Dzień</button>
+          </div>
+          <TransactionsDatePicker
+            filterMode={filterMode}
+            monthValue={monthValue}
+            dayValue={dayValue}
+            onMonthChange={setMonthValue}
+            onDayChange={setDayValue}
+          />
+          {hasFilter && (
+            <button type="button" className="clear-filter" onClick={clearFilter} title="Wyczyść filtr">
+              <i className="fa-solid fa-xmark"></i>
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="table-card">
+        <table>
+          <thead>
+            <tr><th>Data</th><th>Opis</th><th>Kategoria</th><th className="right">Kwota</th></tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr><td colSpan="4" className="empty-state">Brak transakcji spełniających wybrany filtr.</td></tr>
+            ) : (
+              filtered.map((t, i) => {
+                const positive = t.amount > 0;
+                return (
+                  <tr key={i}>
+                    <td>{t.date}</td>
+                    <td>{t.desc}</td>
+                    <td><span className="category-tag">{t.category}</span></td>
+                    <td className={`right amount ${positive ? "positive" : "negative"}`}>
+                      {positive ? "+" : ""}{t.amount.toLocaleString("pl-PL", { minimumFractionDigits: 2 })} zł
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+// ---------- Wspólne zachowanie modali (animacja + ESC) ----------
+
+function useModalVisibility(onClose) {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setVisible(true));
+    const onKey = (e) => { if (e.key === "Escape") close(); };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      cancelAnimationFrame(id);
+      window.removeEventListener("keydown", onKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function close() {
+    setVisible(false);
+    setTimeout(onClose, 220);
+  }
+
+  return { visible, close };
+}
+
+// ---------- Modal: Dodaj transakcję ----------
+
+function AddTransactionModal({ onClose, onAdd }) {
+  const { visible, close } = useModalVisibility(onClose);
+  const [desc, setDesc] = useState("");
+  const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
+  const [type, setType] = useState("expense");
+  const [amount, setAmount] = useState("");
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    const value = parseFloat(amount);
+    if (!desc.trim() || !value || value <= 0) return;
+
+    onAdd({
+      date: new Date().toLocaleDateString("pl-PL"),
+      desc: desc.trim(),
+      category: type === "income" ? "Wpływy" : category,
+      amount: type === "income" ? value : -value,
+    });
+    close();
+  }
+
+  return (
+    <div className={`modal-overlay ${visible ? "is-open" : ""}`} onClick={close}>
+      <div className={`modal-panel ${visible ? "is-open" : ""}`} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3><i className="fa-solid fa-plus"></i> Dodaj transakcję</h3>
+          <button className="modal-close" onClick={close}><i className="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <form className="modal-form" onSubmit={handleSubmit}>
+          <div className="segmented">
+            <button type="button" className={type === "expense" ? "active expense" : ""} onClick={() => setType("expense")}>
+              <i className="fa-solid fa-arrow-up"></i> Wydatek
+            </button>
+            <button type="button" className={type === "income" ? "active income" : ""} onClick={() => setType("income")}>
+              <i className="fa-solid fa-arrow-down"></i> Wpływ
+            </button>
+          </div>
+
+          <label>
+            Opis
+            <input type="text" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="np. Zakupy spożywcze" required />
+          </label>
+
+          {type === "expense" ? (
+            <label>
+              Kategoria
+              <select value={category} onChange={(e) => setCategory(e.target.value)}>
+                {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+          ) : (
+            <label>
+              Kategoria
+              <input type="text" value="Wpływy" disabled />
+            </label>
+          )}
+
+          <label>
+            Kwota (zł)
+            <input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" required />
+          </label>
+
+          <div className="modal-actions">
+            <button type="button" className="btn-secondary" onClick={close}>Anuluj</button>
+            <button type="submit" className="btn-primary"><i className="fa-solid fa-check"></i> Dodaj</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Modal: Szczegóły miesiąca (drill-down) ----------
+
+function MonthDetailModal({ month, data, onClose }) {
+  const { visible, close } = useModalVisibility(onClose);
+  const breakdown = MONTHLY_CATEGORY_BREAKDOWN[month] || [];
+  const maxVal = Math.max(...breakdown.map((b) => b.amount), 1);
+  const balance = data.income - data.expense;
+
+  return (
+    <div className={`modal-overlay ${visible ? "is-open" : ""}`} onClick={close}>
+      <div className={`modal-panel month-detail ${visible ? "is-open" : ""}`} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3><i className="fa-solid fa-chart-simple"></i> Szczegóły — {month}</h3>
+          <button className="modal-close" onClick={close}><i className="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <div className="month-stats">
+          <div className="stat-pill income"><span>Wpływy</span><strong>{data.income.toLocaleString("pl-PL")} zł</strong></div>
+          <div className="stat-pill expense"><span>Wydatki</span><strong>{data.expense.toLocaleString("pl-PL")} zł</strong></div>
+          <div className={`stat-pill ${balance >= 0 ? "income" : "expense"}`}>
+            <span>Saldo</span>
+            <strong>{balance >= 0 ? "+" : ""}{balance.toLocaleString("pl-PL")} zł</strong>
+          </div>
+        </div>
+
+        <h4>Podział wydatków wg kategorii</h4>
+        <div className="category-breakdown">
+          {breakdown.map((b, i) => (
+            <div className="breakdown-row" key={b.category}>
+              <div className="breakdown-label">
+                <span className="dot" style={{ background: CATEGORY_COLORS[b.category] || "#64748b" }}></span>
+                {b.category}
+              </div>
+              <div className="breakdown-bar-track">
+                <div
+                  className="breakdown-bar-fill"
+                  style={{
+                    width: visible ? `${(b.amount / maxVal) * 100}%` : "0%",
+                    background: CATEGORY_COLORS[b.category] || "#64748b",
+                    transitionDelay: `${i * 60}ms`,
+                  }}
+                ></div>
+              </div>
+              <div className="breakdown-amount">{b.amount.toLocaleString("pl-PL")} zł</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- App ----------
+
+function App() {
+  const [monthly, setMonthly] = useState(INITIAL_MONTHLY);
+  const [transactions, setTransactions] = useState(INITIAL_TRANSACTIONS);
+  const [balance, setBalance] = useState(BASE_BALANCE);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(null);
+
+  const currentMonth = monthly[monthly.length - 1];
+  const currentBreakdown = useMemo(
+    () => MONTHLY_CATEGORY_BREAKDOWN[currentMonth.month] || [],
+    [currentMonth.month]
+  );
+
+  useEffect(() => {
+    AOS.init({ duration: 700, once: true, offset: 40 });
+  }, []);
+
+  function handleAddTransaction(tx) {
+    setTransactions((prev) => [tx, ...prev]);
+    setBalance((prev) => prev + tx.amount);
+    setMonthly((prev) => {
+      const next = [...prev];
+      const last = { ...next[next.length - 1] };
+      if (tx.amount > 0) last.income += tx.amount;
+      else last.expense += Math.abs(tx.amount);
+      next[next.length - 1] = last;
+      return next;
+    });
+  }
+
+  return (
+    <>
+      <BackgroundDecor />
+      <div className="app">
+        <Sidebar />
+        <main>
+          <Topbar onAddClick={() => setShowAddModal(true)} />
+          <SummaryCards balance={balance} currentMonth={currentMonth} />
+          <BitcoinCarousel />
+          <ChartsSection monthly={monthly} onSelectMonth={setSelectedMonth} currentBreakdown={currentBreakdown} />
+          <TransactionsTable transactions={transactions} />
+          <footer className="footer">
+            <p>Moje Finanse — prywatny panel budżetowy. Dane przykładowe, wygenerowane lokalnie.</p>
+          </footer>
+        </main>
+      </div>
+
+      {showAddModal && (
+        <AddTransactionModal onClose={() => setShowAddModal(false)} onAdd={handleAddTransaction} />
+      )}
+
+      {selectedMonth && (
+        <MonthDetailModal
+          month={selectedMonth}
+          data={monthly.find((m) => m.month === selectedMonth)}
+          onClose={() => setSelectedMonth(null)}
+        />
+      )}
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
